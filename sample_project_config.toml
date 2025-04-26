@@ -1,0 +1,6 @@
+# Note that you can override any systemwide setting here in the
+# project file.
+
+app-name = "Fooblitsky"
+app-website = "https://www.example.com"
+

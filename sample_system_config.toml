@@ -1,0 +1,5 @@
+osslsigncode = "/usr/bin/osslsigncode"
+certificate = "/path/to/code/signing/certificate.pfx"
+passphrase = "certificate passphrase goes here"
+timestamp-service = "http://timestamp.sectigo.com"
+digest-algo = "sha256"

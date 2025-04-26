@@ -1,0 +1,146 @@
+#!/usr/bin/python3
+# coding: UTF-8
+
+"""Provides a convenient wrapper around osslsigntool, making it easy to
+apply Windows code signatures to Windows executables you've cross-compiled
+on Linux."""
+
+from sys import stderr
+from sys import exit as sysexit
+from os import environ, sep
+from os.path import exists, isfile
+from typing import Dict
+import tomllib
+import argparse
+import webbrowser
+import subprocess
+
+
+def parse_command_line() -> argparse.Namespace:
+    """Parses the command line and executes certain commands if invoked."""
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        prog='signtool',
+        description='A convenient wrapper around osslsigntool.')
+    parser.add_argument("filename", help="the file to sign")
+    parser.add_argument("-n", "--app-name", help="the application name",
+                        metavar="NAME")
+    parser.add_argument("-w", "--app-website", help="the application website",
+                        metavar="URL")
+    parser.add_argument("-p", "--project",
+                        help="location of your project configuration file",
+                        metavar="PROJ")
+    parser.add_argument("-s", "--system", default=sep.join([
+        environ["HOME"],
+        ".config",
+        "signtool",
+        "signtool.toml"]),
+        help="location of the systemwide config file",
+        metavar="SYS")
+    parser.add_argument("-v", "--version", action="version",
+                        version="%(prog)s 0.9")
+    parser.add_argument("-r", "--report-bug", action="store_true",
+                        help="report a bug to the developer")
+    parser.add_argument("-l", "--show-license", action="store_true",
+                        help="show libre/open source licensing information")
+    args = parser.parse_args()
+
+    if args.show_license:
+        webbrowser.open_new_tab("https://opensource.org/license/apache-2-0")
+        sysexit(0)
+    if args.report_bug:
+        webbrowser.open_new_tab("https://github.com/rjhansen/signtool/issues")
+        sysexit(0)
+
+    return args
+
+
+def sanity_check(my_data: Dict[str, str]):
+    """Ensures the sanity of user inputs."""
+    for name in [
+        "osslsigncode",
+        "certificate",
+        "filename"
+    ]:
+        if not (exists(my_data[name]) and isfile(my_data[name])):
+            print(f"Error: value for key '{name}' doesn't exist or " +
+                  "isn't a file.", file=stderr)
+            sysexit(4)
+    if not my_data["passphrase"]:
+        print("Error: no passphrase specified.", file=stderr)
+        sysexit(8)
+    for name in [
+        "app-name",
+        "app-website",
+        "timestamp-service",
+            "digest-algo"]:
+        if not my_data[name]:
+            print(f"Error: no data provided for key '{name}'.",
+                  file=stderr)
+            sysexit(16)
+    if my_data["digest-algo"] not in set(["sha256", "sha384", "sha512"]):
+        print(f"Error: unknown digest algorithm '{my_data['digest-algo']}.",
+              file=stderr)
+        sysexit(32)
+
+
+def parse_config_files(args: argparse.Namespace) -> Dict[str, str]:
+    """Parses TOML config files for signtool."""
+    rv: Dict[str, str] = {
+        "osslsigncode": "",
+        "certificate": "",
+        "passphrase": "",
+        "app-name": "",
+        "app-website": "",
+        "timestamp-service": "",
+        "digest-algo": ""
+    }
+
+    filenames = [X for X in [args.system, args.project]
+                 if X and exists(X) and isfile(X)]
+    for filename in filenames:
+        try:
+            with open(filename, mode='rb') as fh:
+                my_data = tomllib.load(fh)
+                for key in rv:
+                    if key in my_data:
+                        rv[key] = str(my_data[key])
+        except IOError:
+            print(f"Error while reading {filename}. Aborting...",
+                  file=stderr)
+            sysexit(1)
+        except tomllib.TOMLDecodeError:
+            print(f"{filename} is not a valid TOML file. Aborting...",
+                  file=stderr)
+            sysexit(2)
+
+    rv["filename"] = args.filename
+    if args.app_name:
+        rv["app-name"] = args.app_name
+    if args.app_website:
+        rv["app-website"] = args.app_website
+    rv["digest-algo"] = rv["digest-algo"].lower()
+    sanity_check(rv)
+    return rv
+
+
+if __name__ == '__main__':
+    arguments: argparse.Namespace = parse_command_line()
+    data: Dict[str, str] = parse_config_files(arguments)
+    cmdline = [
+        data["osslsigncode"],
+        "sign",
+        "-pkcs12", data['certificate'],
+        "-pass", data['passphrase'],
+        "-n", data["app-name"],
+        "-i", data["app-website"],
+        "-t", data["timestamp-service"],
+        "-h", data["digest-algo"],
+        "-in", data["filename"],
+        "-out", data['filename'] + '.signed'
+    ]
+    print("$ " + ' '.join(cmdline))
+    output = subprocess.run(cmdline, capture_output=True,
+                            check=False, encoding="UTF-8")
+    print(output.stdout)
+    print(output.stderr, file=stderr)
+    sysexit(output.returncode)
